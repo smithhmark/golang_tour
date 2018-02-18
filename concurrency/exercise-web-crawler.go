@@ -10,24 +10,35 @@ type Fetcher interface {
 	Fetch(url string) (body string, urls []string, err error)
 }
 
-// Crawl uses fetcher to recursively crawl
-// pages starting with url, to a maximum of depth.
-func Crawl(url string, depth int, fetcher Fetcher) {
-	// TODO: Fetch URLs in parallel.
-	// TODO: Don't fetch the same URL twice.
-	// This implementation doesn't do either:
+func crawl(url string, depth int, fetcher Fetcher, visited map[string]int) {
 	if depth <= 0 {
 		return
 	}
+        if cnt, ok := visited[url]; ok {
+                visited[url] = cnt + 1
+                return
+        }
 	body, urls, err := fetcher.Fetch(url)
+        visited[url] = 1
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 	fmt.Printf("found: %s %q\n", url, body)
 	for _, u := range urls {
-		Crawl(u, depth-1, fetcher)
+		crawl(u, depth-1, fetcher, visited)
 	}
+	return
+}
+
+// Crawl uses fetcher to recursively crawl
+// pages starting with url, to a maximum of depth.
+func Crawl(url string, depth int, fetcher Fetcher) {
+	// TODO: Fetch URLs in parallel.
+	// TODO: Don't fetch the same URL twice. DONE!!!
+	// This implementation doesn't do either:
+        visited := make(map[string]int)
+        crawl(url, depth, fetcher, visited)
 	return
 }
 
