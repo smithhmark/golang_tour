@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"sync"
+	"time"
 )
 
 type Fetcher interface {
@@ -10,24 +12,52 @@ type Fetcher interface {
 	Fetch(url string) (body string, urls []string, err error)
 }
 
-func crawl(url string, depth int, fetcher Fetcher, visited map[string]int) {
-	if depth <= 0 {
-		return
+type job struct {
+	url   string
+	depth int
+}
+
+type jobLog struct {
+	log map[string]int
+	mux sync.Mutex
+}
+
+func crawl(jq chan job, doneq chan int, worker int, fetcher Fetcher, visited *jobLog, donecb func()) {
+	//fmt.Printf("(%v) starting\n", worker)
+	for {
+		jb := <-jq
+		fmt.Printf("(%v):%v\n", worker, jb)
+		if jb.url == "" || len(jb.url) == 0 {
+			fmt.Println("poison!!!")
+			break
+		}
+		if jb.depth <= 0 {
+			fmt.Printf("(%v) done()\n", worker)
+			donecb()
+			continue
+		}
+		visited.mux.Lock()
+		visited.log[jb.url]++
+		visits := visited.log[jb.url]
+		visited.mux.Unlock()
+
+		if visits > 1 {
+			// skipping repeat visit
+			fmt.Printf("(%v) skip: %s\n", worker, jb.url)
+			continue
+		}
+		body, urls, err := fetcher.Fetch(jb.url)
+		if err != nil {
+			fmt.Printf("(%v) %s", worker, err)
+			continue
+		}
+		fmt.Printf("(%v) found: %s %q\n", worker, jb.url, body)
+		for _, u := range urls {
+			jq <- job{u, jb.depth - 1}
+		}
 	}
-        visited[url]++
-        if visited[url] > 1 {
-                return
-        }
-	body, urls, err := fetcher.Fetch(url)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	fmt.Printf("found: %s %q\n", url, body)
-	for _, u := range urls {
-		crawl(u, depth-1, fetcher, visited)
-	}
-	return
+	doneq <- worker
+	fmt.Printf("(%v) terminating\n", worker)
 }
 
 // Crawl uses fetcher to recursively crawl
@@ -36,13 +66,39 @@ func Crawl(url string, depth int, fetcher Fetcher) {
 	// TODO: Fetch URLs in parallel.
 	// TODO: Don't fetch the same URL twice. DONE!!!
 	// This implementation doesn't do either:
-        visited := make(map[string]int)
-        crawl(url, depth, fetcher, visited)
+	visited := new(jobLog)
+	visited.log = make(map[string]int)
+	jq := make(chan job, 10)
+	doneq := make(chan int, 2)
+	jq <- job{url, depth}
+	workers := 2
+	done := func() {
+		fmt.Println("   taking poison pills")
+		for ii := 0; ii < workers; ii++ {
+			jq <- job{"", -1}
+		}
+		return
+	}
+	for ii := 0; ii < workers; ii++ {
+		go crawl(jq, doneq, ii, fetcher, visited, done)
+	}
+	complete := 0
+	for complete < workers {
+		select {
+		case who := <-doneq:
+			fmt.Printf("(MAIN) worker %d done\n", who)
+			complete++
+		default:
+			fmt.Printf("(MAIN) dozing qlen=%v\n", len(jq))
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 	return
 }
 
 func main() {
-	Crawl("https://golang.org/", 4, fetcher)
+	Crawl("https://golang.org/", 3, fetcher)
+	//Crawl("https://golang.org/", 4, fetcher)
 }
 
 // fakeFetcher is Fetcher that returns canned results.
@@ -93,4 +149,3 @@ var fetcher = fakeFetcher{
 		},
 	},
 }
-
