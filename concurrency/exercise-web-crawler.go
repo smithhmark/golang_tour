@@ -14,12 +14,11 @@ func crawl(url string, depth int, fetcher Fetcher, visited map[string]int) {
 	if depth <= 0 {
 		return
 	}
-        if cnt, ok := visited[url]; ok {
-                visited[url] = cnt + 1
+        visited[url]++
+        if visited[url] > 1 {
                 return
         }
 	body, urls, err := fetcher.Fetch(url)
-        visited[url] = 1
 	if err != nil {
 		fmt.Println(err)
 		return
